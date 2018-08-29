@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Duration;
 
 use futures::task;
-use futures::future::{self, lazy};
+use futures::future::{self, lazy, Executor as FutureExecutor};
 use futures::prelude::*;
 use futures::sync::oneshot;
 
@@ -76,6 +76,29 @@ fn spawn_many() {
     assert_eq!(cnt.get(), ITER);
 }
 
+
+#[test]
+fn execute_from_block_on_all() {
+    let cnt = Rc::new(Cell::new(0));
+    let c = cnt.clone();
+
+    let msg = tokio_current_thread::block_on_all(lazy(move || {
+        c.set(1 + c.get());
+
+        // Spawn!
+        tokio_current_thread::TaskExecutor::current().execute(lazy(move || {
+            c.set(1 + c.get());
+            Ok::<(), ()>(())
+        }));
+
+        Ok::<_, ()>("hello")
+    })).unwrap();
+
+    assert_eq!(2, cnt.get());
+    assert_eq!(msg, "hello");
+}
+
+
 #[test]
 fn does_not_set_global_executor_by_default() {
     use tokio_executor::Executor;
@@ -90,6 +113,18 @@ fn does_not_set_global_executor_by_default() {
 }
 
 #[test]
+fn execute_does_not_set_global_executor_by_default() {
+    block_on_all(lazy(|| {
+        tokio_executor::DefaultExecutor::current()
+            .execute(Box::new(lazy(|| ok())))
+            .unwrap_err();
+
+        ok()
+    })).unwrap();
+}
+
+
+#[test]
 fn spawn_from_block_on_future() {
     let cnt = Rc::new(Cell::new(0));
 
@@ -102,6 +137,29 @@ fn spawn_from_block_on_future() {
             cnt.set(1 + cnt.get());
             Ok(())
         }));
+
+        Ok::<_, ()>(())
+    })).unwrap();
+
+    tokio_current_thread.run().unwrap();
+
+    assert_eq!(1, cnt.get());
+}
+
+
+#[test]
+fn execute_from_block_on_future() {
+    let cnt = Rc::new(Cell::new(0));
+
+    let mut tokio_current_thread = CurrentThread::new();
+
+    tokio_current_thread.block_on(lazy(|| {
+        let cnt = cnt.clone();
+
+        tokio_current_thread::TaskExecutor::current().execute(lazy(move || {
+            cnt.set(1 + cnt.get());
+            Ok(())
+        })).unwrap();
 
         Ok::<_, ()>(())
     })).unwrap();
